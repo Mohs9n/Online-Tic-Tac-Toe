@@ -1,0 +1,180 @@
+﻿@page "/test"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+
+<h3>Test</h3>
+<div class="form-group">
+  <label>
+    Game Id: 
+    <input @bind="_roomId"/> 
+    <button @onclick="ConnectToGame">Connect</button>
+  </label> 
+</div>
+@if (_roomIdError != "")
+{
+  <p>@_roomIdError</p> 
+}
+<table>
+  <tr>
+    <td><button class="btn btn-primary" @onclick="() => PlayMove(0)">@_board[0]</button></td>
+    <td><button class="btn btn-secondary" @onclick="() => PlayMove(1)">@_board[1]</button></td>
+    <td><button class="btn btn-secondary" @onclick="() => PlayMove(2)">@_board[2]</button></td>
+  </tr>
+  <tr>
+    <td><button class="btn btn-secondary" @onclick="() => PlayMove(3)">@_board[3]</button></td>
+    <td><button class="btn btn-secondary" @onclick="() => PlayMove(4)">@_board[4]</button></td>
+    <td><button class="btn btn-secondary" @onclick="() => PlayMove(5)">@_board[5]</button></td>
+  </tr>
+  <tr>
+    <td><button class="btn btn-secondary" @onclick="() => PlayMove(6)">@_board[6]</button></td>
+    <td><button class="btn btn-secondary" @onclick="() => PlayMove(7)">@_board[7]</button></td>
+    <td><button class="btn btn-secondary" @onclick="() => PlayMove(8)">@_board[8]</button></td>
+  </tr>
+</table>
+@if (_winner != "")
+{
+  <p>@_winner is the winner</p>
+  <button @onclick="ResetGame">Restart</button>
+}
+<p>@_turn</p>
+<Chat></Chat>
+<style>
+  .btn {
+    min-width: 50px; /* Adjust this value according to your desired button size */
+    min-height: 50px;
+  }
+</style>
+
+@code {
+  private HubConnection? _hubConnection;
+  private int? _roomId = null;
+  private string _board = "         ";
+  private string _winner = "";
+  private string _roomIdError = "";
+  private bool _gameOver = false;
+  private bool _turn = false;
+  private string _side = "";
+  // protected override async Task OnInitializedAsync()
+  // {
+  // }
+  private void resetVars()
+  {
+    _hubConnection = null;
+    _board = "         ";
+    _winner = "";
+    _roomIdError = "";
+    _turn = false;
+  }
+  private async Task ConnectToGame()
+  {
+    await DisposeAsync();
+    resetVars();
+    _hubConnection = new HubConnectionBuilder()
+      .WithUrl("http://localhost:5136/xohub/"+_roomId)
+      .Build();
+
+    _hubConnection.On<string>("ReceiveBoard", (board =>
+    {
+      _board = board;
+      Console.Out.WriteLine("_board receive = {0}", _board);
+      SetTurn();
+      InvokeAsync(StateHasChanged);
+    }));
+    _hubConnection.On<string>("ReceiveSide", (side =>
+    {
+      _side = side;
+      InvokeAsync(StateHasChanged);
+    }));
+
+    _hubConnection.On("OpponentDisconnected", () =>
+    {
+      _roomIdError = "OpponentDisconnected";
+      _turn = false;
+      InvokeAsync(StateHasChanged);
+    });
+    
+    _hubConnection.On<string>("ReceiveWinner", (winner =>
+    {
+      _winner = winner;
+      InvokeAsync(StateHasChanged);
+    }));
+    await _hubConnection.StartAsync();
+    _winner = "";
+  }
+
+  private async Task PlayMove(int btn)
+  {
+    if (_gameOver)
+      return;
+    if (_board[btn] != ' ')
+      return;
+    if (_side == "" | _side=="S")
+      return;
+    if (_turn == false)
+      return;
+    if (_winner != "")
+      return;
+    char[] chars = _board.ToCharArray();
+    chars[btn] = _side[0];
+    if (_side == "X")
+      chars[9] = 'O';
+    else if (_side == "O")
+      chars[9] = 'X';
+    _turn = false;
+    _board = new string(chars);
+    Console.Out.WriteLine("_board = {0}", _board);
+    
+    if (_hubConnection is not null)
+    {
+      await _hubConnection.SendAsync("SendBoard", _board);
+    }
+
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task ResetGame()
+  {
+    Console.WriteLine("WHat");
+    await _hubConnection.SendAsync("ResetBoard", _roomId);
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task SendBoard()
+  {
+    Console.WriteLine("SendBoard");
+    if (_hubConnection is not null)
+    {
+      Console.WriteLine("not null");
+      await _hubConnection.SendAsync("SendBoard", _board);
+    }
+  }
+
+  private void SetTurn()
+  {
+    _hubConnection.SendAsync("SendRoomStatus");
+    Console.Out.WriteLine("In set Turn");
+    Console.WriteLine("board Size: {0}",_board.Length);
+    Console.Out.WriteLine("_side = {0}", _side);
+    if (_board[9] == 'X' && _side == "X")
+      _turn = true;
+      
+    else if (_board[9] == 'O' && _side == "O")
+      _turn = true;
+    // switch (_board[9])
+    // {
+    //   case 'X' when _side == "X":
+    //   case 'O' when _side == "O":
+    //     _turn = true;
+    //     break;
+    // }
+  }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+    }
+}
